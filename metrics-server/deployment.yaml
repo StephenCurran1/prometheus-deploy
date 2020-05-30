@@ -1,0 +1,90 @@
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: metrics-server
+  namespace: kube-system
+  labels:
+    k8s-app: metrics-server
+    env: production
+    site: aws
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      k8s-app: metrics-server
+      env: production
+      site: aws
+  template:
+    metadata:
+      name: metrics-server
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+      labels:
+        k8s-app: metrics-server
+        env: production
+        site: aws
+    spec:
+      containers:
+      - name: metrics-server
+        image: k8s.gcr.io/metrics-server-amd64:v0.3.1
+        imagePullPolicy: Always
+        args:
+        - --v=2
+        - --secure-port=6443
+        - --kubelet-insecure-tls
+        - --cert-dir=/tmp/certificates
+        - --tls-min-version=VersionTLS12
+        - --metric-resolution=15s
+        env:
+        - name: GOMAXPROCS
+          value: "1"
+        ports:
+        - containerPort: 6443
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 100m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 6443
+            scheme: HTTPS
+          initialDelaySeconds: 90
+          periodSeconds: 10
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 2
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 6443
+            scheme: HTTPS
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 5
+        securityContext:
+          runAsUser: 65534
+          runAsGroup: 65534
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp-dir
+          mountPath: /tmp
+      serviceAccountName: metrics-server
+      volumes:
+      - name: tmp-dir
+        emptyDir: {}
+      tolerations:
+      - operator: Exists

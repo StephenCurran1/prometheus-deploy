@@ -1,0 +1,165 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: prometheus-server
+  namespace: cluster-monitoring
+  labels:
+    app: prometheus-server
+    env: production
+    monitoring: cluster
+    site: aws-us-east-1
+spec:
+  podManagementPolicy: Parallel
+  revisionHistoryLimit: 1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus-server
+      monitoring: cluster
+      env: production
+  serviceName: prometheus-server
+  template:
+    metadata:
+      labels:
+        app: prometheus-server
+        monitoring: cluster
+        env: production
+        site: aws-us-east-1
+    spec:
+      initContainers:
+      - name: prometheus-config-checker
+        image: prom/prometheus:v2.6.0
+        command:
+        - /bin/promtool
+        - check
+        - config
+        - /etc/prometheus/config/prometheus.yml
+        resources:
+          requests:
+            cpu: 10m
+            memory: 10Mi
+        volumeMounts:
+        - name: prometheus-server-config
+          mountPath: /etc/prometheus/config
+          readOnly: true
+        - name: prometheus-server-alerts
+          mountPath: /etc/prometheus/alerts
+          readOnly: true
+        - name: prometheus-server-rules
+          mountPath: /etc/prometheus/rules
+          readOnly: true
+      containers:
+      - name: prometheus-config-reloader
+        image: jimmidyson/configmap-reload:v0.2.2
+        args:
+        - --volume-dir=/etc/prometheus/config
+        - --volume-dir=/etc/prometheus/alerts
+        - --volume-dir=/etc/prometheus/rules
+        - --webhook-url=http://127.0.0.1:9090/-/reload
+        resources:
+          requests:
+            cpu: 10m
+            memory: 10Mi
+        volumeMounts:
+        - name: prometheus-server-config
+          mountPath: /etc/prometheus/config
+          readOnly: true
+        - name: prometheus-server-alerts
+          mountPath: /etc/prometheus/alerts
+          readOnly: true
+        - name: prometheus-server-rules
+          mountPath: /etc/prometheus/rules
+          readOnly: true
+      - name: prometheus-server
+        image: prom/prometheus:v2.6.0
+        args:
+        - --config.file=/etc/prometheus/config/prometheus.yml
+        - --storage.tsdb.path=/prometheus
+        - --storage.tsdb.retention=21d # retain 3 weeks of data
+        - --web.console.libraries=/etc/prometheus/console_libraries
+        - --web.console.templates=/etc/prometheus/consoles
+        - --web.enable-lifecycle
+        - --log.format=json
+        ports:
+        - containerPort: 9090
+          protocol: TCP
+        env:
+        - name: "GOMAXPROCS"
+          value: "2"
+        livenessProbe:
+          httpGet:
+            path: /-/healthy
+            port: 9090
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+          timeoutSeconds: 1
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: 9090
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          successThreshold: 1
+          failureThreshold: 30
+          timeoutSeconds: 1
+        resources:
+          requests:
+            cpu: 1
+            memory: 4Gi
+          limits:
+            cpu: 2
+            memory: 12Gi
+        volumeMounts:
+        - name: prometheus-server-config
+          mountPath: /etc/prometheus/config
+          readOnly: true
+        - name: prometheus-server-alerts
+          mountPath: /etc/prometheus/alerts
+          readOnly: true
+        - name: prometheus-server-rules
+          mountPath: /etc/prometheus/rules
+          readOnly: true
+        - name: prometheus-server-storage
+          mountPath: /prometheus
+      volumes:
+      - name: prometheus-server-config
+        configMap:
+          name: prometheus-server-config
+          items:
+          - key: prometheus.yml
+            path: prometheus.yml
+      - name: prometheus-server-alerts
+        configMap:
+          name: prometheus-server-alerts
+          items:
+          - key: alerts.yml
+            path: alerts.yml
+      - name: prometheus-server-rules
+        configMap:
+          name: prometheus-server-rules
+          items:
+          - key: rules.yml
+            path: rules.yml
+      securityContext:
+        fsGroup: 65534
+      serviceAccountName: prometheus-server
+      terminationGracePeriodSeconds: 300
+  volumeClaimTemplates:
+  - metadata:
+      name: prometheus-server-storage
+      labels:
+        app: prometheus-server
+        env: production
+        monitoring: applications
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 500Gi
+      storageClassName: gp2-retain

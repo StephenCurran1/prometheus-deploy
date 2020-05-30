@@ -1,0 +1,84 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-state-metrics
+  namespace: cluster-monitoring
+  labels:
+    app: kube-state-metrics
+    monitoring: cluster
+    env: production
+spec:
+  progressDeadlineSeconds: 60
+  revisionHistoryLimit: 1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-state-metrics
+      monitoring: cluster
+      env: production
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: kube-state-metrics
+        monitoring: cluster
+        env: production
+    spec:
+      serviceAccount: kube-state-metrics
+      serviceAccountName: kube-state-metrics
+      securityContext:
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: kube-state-metrics
+        imagePullPolicy: Always
+        image: "quay.io/coreos/kube-state-metrics:v1.4.0"
+        args:
+        - "--port=8080"
+        - "--collectors=cronjobs"
+        - "--collectors=daemonsets"
+        - "--collectors=deployments"
+        - "--collectors=endpoints"
+        - "--collectors=horizontalpodautoscalers"
+        - "--collectors=jobs"
+        - "--collectors=limitranges"
+        - "--collectors=namespaces"
+        - "--collectors=nodes"
+        - "--collectors=persistentvolumeclaims"
+        - "--collectors=persistentvolumes"
+        - "--collectors=pods"
+        - "--collectors=replicasets"
+        - "--collectors=replicationcontrollers"
+        - "--collectors=resourcequotas"
+        - "--collectors=services"
+        - "--collectors=statefulsets"
+        ports:
+        - name: metrics
+          containerPort: 8080
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 1
+          timeoutSeconds: 1
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 1
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            #memory: ?

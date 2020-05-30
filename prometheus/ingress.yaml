@@ -1,0 +1,47 @@
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: prometheus-server
+  namespace: cluster-monitoring
+  labels:
+    app: prometheus-server
+    monitoring: cluster
+    env: production
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/target-type: instance
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/subnets: "subnet-02ae5a2eee67f39dc,subnet-064e03a06d8a7e5d4,subnet-0c795f1fe96c66624"
+    alb.ingress.kubernetes.io/security-groups: alb-restricted-internet-sg
+    alb.ingress.kubernetes.io/tags: "Name=cluster-monitoring,App=Prometheus,Environment=production,Monitoring=cluster"
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:us-east-1:374825256959:certificate/fbd5a80f-c81c-4e43-8e4c-16df8c7529ce"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-policy: "ELBSecurityPolicy-TLS-1-2-2017-01"
+    alb.ingress.kubernetes.io/actions.reject: '{"Type": "fixed-response", "FixedResponseConfig": {"ContentType":"text/plain", "StatusCode":"404"}}'
+    external-dns.alpha.kubernetes.io/hostname: "cluster-metrics.production.tripstack.com.,cluster-alerts.production.tripstack.com."
+    external-dns.alpha.kubernetes.io/ttl: "60"
+spec:
+  rules:
+    - host: cluster-metrics.production.tripstack.com
+      http:
+        paths:
+          - path: /-/*
+            backend:
+              serviceName: reject
+              servicePort: use-annotation
+          - path: /*
+            backend:
+              serviceName: prometheus-server
+              servicePort: 9090
+    - host: cluster-alerts.production.tripstack.com
+      http:
+        paths:
+          - path: /-/*
+            backend:
+              serviceName: reject
+              servicePort: use-annotation
+          - path: /*
+            backend:
+              serviceName: alertmanager
+              servicePort: 9093

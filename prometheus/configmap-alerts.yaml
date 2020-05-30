@@ -1,0 +1,350 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-server-alerts
+  namespace: cluster-monitoring
+  labels:
+    app: prometheus-server
+    monitoring: cluster
+    env: production
+data:
+  alerts.yml: |-
+    groups:
+
+    # Kubernetes alarms
+    - name: kubernetes-cluster
+      rules:
+      - alert: KubernetesAPIServersNoRedundancy
+        expr: sum(up{job="kubernetes-apiservers"}) == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 1 Kubernetes API Server running
+          description: "Kubernetes API Server has no redundancy with a single replica running for the last 5 minutes"
+
+      - alert: KubernetesNodesUpLessThan90Percent
+        expr: (sum(up{job="kubernetes-nodes"}) / count(up{job="kubernetes-nodes"}) * 100) <= 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Some Kubernetes nodes are down
+          description: "Less than 85% of the Kubernetes nodes in the cluster are up. Healthy nodes: {{ $value }}%"
+
+      - alert: KubernetesNodesReadyLessThan70Percent
+        expr: (sum(kube_node_status_condition{condition="Ready", status="true"}) / count(up{job="kubernetes-nodes"}) * 100) <= 75
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Multiple Kubernetes nodes are not in Ready state
+          description: "Less than 75% of the Kubernetes nodes in the cluster are Ready. Ready nodes: {{ $value }}%"
+
+      - alert: KubernetesNodeDiskUsageExceeded75%
+        expr: ((node_filesystem_size_bytes{mountpoint="/"}  - node_filesystem_avail_bytes{mountpoint="/"}) / node_filesystem_size_bytes{mountpoint="/"}) * 100 > 75
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Kubernetes node disk usage has exceeded 75%
+          description: "Kubernetes node {{ $labels.instance }} has used more than 75% of available disk space"
+
+      - alert: KubernetesNodeDiskUsageExceeded90%
+        expr: ((node_filesystem_size_bytes{mountpoint="/"}  - node_filesystem_avail_bytes{mountpoint="/"}) / node_filesystem_size_bytes{mountpoint="/"}) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Kubernetes node disk usage has exceeded 90%
+          description: "Kubernetes node {{ $labels.instance }} has used more than 90% of available disk space"
+
+      - alert: KubernetesNodeDiskPressure
+        expr: kube_node_status_condition{condition="DiskPressure", status="true"} == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Kubernetes node has DiskPressure
+          description: "Kubernetes node {{ $labels.node }} has disk pressure"
+
+      - alert: KubernetesNodeMemoryPressure
+        expr: kube_node_status_condition{condition="MemoryPressure", status="true"} == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Kubernetes node has MemoryPressure
+          description: "Kubernetes node {{ $labels.node }} has disk pressure"
+
+      - alert: KubernetesClusterMemoryCapacityExhausted
+        expr: sum(kube_pod_container_resource_requests_memory_bytes) / sum(kube_node_status_capacity_memory_bytes) * 100 > 97
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Memory capacity is nearly exhausted
+          description: "total memory requested by Pods has exceeded 97% of memory capacity. Current memory requests: {{ $value }}%"
+
+      - alert: KubernetesClusterCpuCapacityExhausted
+        expr: sum(kube_pod_container_resource_requests_cpu_cores) / sum(kube_node_status_capacity_cpu_cores) * 100 > 97
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: CPU capacity ois nearly exhausted
+          description: "total CPU requested by Pods has exceeded 97% of cluster CPU capacity. Current CPU requests: {{ $value }}%"
+
+      - alert: KubernetesPodsCrashLoopBackOff
+        expr: sum(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Multiple Pods in CrashLoopBackOff state
+          description: "multiple Kubernetes Pods are in CrashLoopBackOff state. Count: {{ $value }}"
+
+      - alert: KubernetesPodsPending
+        expr: sum(kube_pod_status_phase{phase="Pending"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Multiple Pods in Pending state
+          description: "multiple Kubernetes Pods are in Pending state. Count: {{ $value }}"
+
+      - alert: KubernetesPodsOOMKilled
+        expr: sum(kube_pod_container_status_terminated_reason{reason="OOMKilled"}) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Multiple Pods killed due to OOM
+          description: "multiple Kubernetes Pods were OOMKilled in the last 2 minutes. Count: {{ $value }}"
+
+    # Elasticsearch Cluster Alarms - Common
+    - name: elasticsearch-alerts
+      rules:
+      - alert: ElasticSearchClusterDown
+        expr: elasticsearch_cluster_health_up{cluster=~"logging-elasticsearch-exporter|data-elasticsearch-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ElasticSearch cluster {{ $labels.cluster }} is down"
+          description: "ElasticSearch cluster {{ $labels.cluster }} is down for 2 minutes"
+
+      - alert: ElasticSearchClusterHealthRed
+        expr: elasticsearch_cluster_health_status{exported_cluster=~"tripstack-monitoring-prod|tripstack-prod-elasticsearch", color="red"} == 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ElasticSearch cluster {{ $labels.exported_cluster }} health is red"
+          description: "ElasticSearch cluster {{ $labels.exported_cluster }} health is in red state for 2 minutes"
+
+      - alert: ElasticSearchClusterHealthYellowWarning
+        expr: elasticsearch_cluster_health_status{exported_cluster=~"tripstack-monitoring-prod|tripstack-prod-elasticsearch", color="yellow"} == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ElasticSearch cluster {{ $labels.exported_cluster }} health is yellow"
+          description: "ElasticSearch cluster {{ $labels.exported_cluster }} health is in yellow state for 5 minutes"
+
+      # if cluster state is yellow for 60 minutes, then something is likely wrong and requires investigation
+      - alert: ElasticSearchClusterHealthYellowAlert
+        expr: elasticsearch_cluster_health_status{exported_cluster=~"tripstack-monitoring-prod|tripstack-prod-elasticsearch", color="yellow"} == 1
+        for: 60m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ElasticSearch cluster {{ $labels.exported_cluster }} health is yellow"
+          description: "ElasticSearch cluster {{ $labels.exported_cluster }} health has been in yellow state for 60 minutes"
+
+
+    # Logging ElasticSearch cluster alarms
+    - name: logging-elasticsearch-alerts
+      rules:
+      - alert: LoggingElasticSearchUnassignedShards
+        expr: elasticsearch_cluster_health_unassigned_shards{exported_cluster="tripstack-monitoring-prod"} > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ElasticSearch cluster {{ $labels.exported_cluster }} has unassigned shards {{ $value }}"
+          description: "ElasticSearch cluster {{ $labels.exported_cluster }} has unassigned shards. Unassigned shards: {{ $value }}"
+
+      - alert: LoggingElasticSearchInitializingShards
+        expr: elasticsearch_cluster_health_initializing_shards{exported_cluster="tripstack-monitoring-prod"} > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ElasticSearch cluster {{ $labels.exported_cluster }} has initializing shards {{ $value }}"
+          description: "ElasticSearch cluster {{ $labels.exported_cluster }} has initializing shards. Initializing shards: {{ $value }}"
+
+      - alert: LoggingElasticSearchMissingDataNodes
+        expr: elasticsearch_cluster_health_number_of_data_nodes{exported_cluster="tripstack-monitoring-prod"} < 9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ElasticSearch cluster {{ $labels.exported_cluster }} has missing data nodes"
+          description: "ElasticSearch cluster {{ $labels.exported_cluster }} has missing data nodes. Expected count: 9. Current count: {{ $value }}"
+
+      - alert: LoggingElasticSearchDataNodeLowWatermarkThreshold
+        expr: elasticsearch:node:disk_used_percent{exported_cluster="tripstack-monitoring-prod",es_data_node="true"} >= 83.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ElasticSearch data node {{ $labels.name }} is nearing the low watermark threshold for disk usage"
+          description: "ElasticSearch data node {{ $labels.name }} is about to exceed the threshold (85%) for high watermark for disk usage. Current disk usage: {{ $value }}"
+
+      - alert: LoggingElasticSearchDataNodeHighWatermarkThreshold
+        expr: elasticsearch:node:disk_used_percent{exported_cluster="tripstack-monitoring-prod", es_data_node="true"} >= 88.0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ElasticSearch data node {{ $labels.name }} is nearing the high watermark threshold for disk usage"
+          description: "ElasticSearch data node {{ $labels.name }} is about to exceed the threshold (90%) for high watermark for disk usage. Current disk usage: {{ $value }}"
+
+      - alert: LoggingElasticSearchDataNodeDiskConsumptionHigh
+        expr: predict_linear(elasticsearch_filesystem_data_available_bytes{exported_cluster="tripstack-monitoring-prod", es_data_node="true"}[1h], 8 * 3600) < 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ElasticSearch data node {{ $labels.name }} disk consumption high"
+          description: "ElasticSearch data node {{ $labels.name }} will fully consume available disk space in 8 hours"
+
+      - alert: LoggingElasticSearchMasterNodeDiskConsumptionHigh
+        expr: predict_linear(elasticsearch_filesystem_data_available_bytes{exported_cluster="tripstack-monitoring-prod", es_master_node="true"}[1h], 8 * 3600) < 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ElasticSearch master node {{ $labels.name }} disk consumption high"
+          description: "ElasticSearch master node {{ $labels.name }} will fully consume available disk space in 8 hours" 
+
+    # Data Elasticsearch cluster alarms
+    - name: data-elasticsearch-alerts
+      rules:
+      - alert: DataElasticSearchUnassignedShards
+        expr: elasticsearch_cluster_health_unassigned_shards{exported_cluster="tripstack-prod-elasticsearch"} > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ElasticSearch cluster {{ $labels.exported_cluster }} has unassigned shards"
+          description: "ElasticSearch cluster {{ $labels.exported_cluster }} has unassigned shards. Unassigned shards: {{ $value }}"
+
+      - alert: DataElasticSearchInitializingShards
+        expr: elasticsearch_cluster_health_initializing_shards{exported_cluster="tripstack-prod-elasticsearch"} > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ElasticSearch cluster {{ $labels.exported_cluster }} has initializing shards"
+          description: "ElasticSearch cluster {{ $labels.exported_cluster }} has initializing shards. Initializing shards: {{ $value }}"
+
+      - alert: DataElasticSearchMissingDataNodes
+        expr: elasticsearch_cluster_health_number_of_data_nodes{exported_cluster="tripstack-prod-elasticsearch"} < 4
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ElasticSearch cluster {{ $labels.exported_cluster }} is missing data nodes"
+          description: "ElasticSearch cluster {{ $labels.exported_cluster }} is missing data nodes. Expected count: 4. Current count: {{ $value }}"
+
+      - alert: DataElasticSearchDataNodeLowWatermarkThreshold
+        expr: elasticsearch:node:disk_used_percent{exported_cluster="tripstack-prod-elasticsearch",es_data_node="true"} >= 83.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ElasticSearch data node {{ $labels.name }} is nearing the low watermark threshold for disk usage"
+          description: "ElasticSearch data node {{ $labels.name }} is about to exceed the threshold (85%) for high watermark for disk usage. Current disk usage: {{ $value }}"
+
+      - alert: DataElasticSearchDataNodeHighWatermarkThreshold
+        expr: elasticsearch:node:disk_used_percent{exported_cluster="tripstack-prod-elasticsearch",es_data_node="true"} >= 88.0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ElasticSearch data node {{ $labels.name }} is nearing the high watermark threshold for disk usage"
+          description: "ElasticSearch data node {{ $labels.name }} is about to exceed the threshold (90%) for high watermark for disk usage. Current disk usage: {{ $value }}"
+
+      - alert: DataElasticSearchDataNodeDiskConsumptionHigh
+        expr: predict_linear(elasticsearch_filesystem_data_available_bytes{exported_cluster="tripstack-prod-elasticsearch",es_data_node="true"}[1h] , 8 * 3600) < 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ElasticSearch data node {{ $labels.name }} disk consumption high"
+          description: "ElasticSearch data node {{ $labels.name }} will fully consume available disk space in 8 hours"
+
+      - alert: DataElasticSearchMasterNodeDiskConsumptionHigh
+        expr: predict_linear(elasticsearch_filesystem_data_available_bytes{exported_cluster="tripstack-prod-elasticsearch",es_master_node="true"}[1h] , 8 * 3600) < 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ElasticSearch master node {{ $labels.name }} disk consumption high"
+          description: "ElasticSearch master node {{ $labels.name }} will fully consume available disk space in 8 hours"
+
+    # Filebeat alarms
+    - name: filebeat
+      rules:
+      - alert: FilebeatDown
+        expr: up{job="cluster-monitoring/filebeat"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Filebeat is down"
+          description: "filebeat on {{ $labels.instance }} is down and could not be scraped by Prometheus for the past 5 minutes"
+
+      - alert: FilebeatZeroOpenLogFiles
+        expr: filebeat_filebeat_harvester{harvester="open_files"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Filebeat is not reading log files"
+          description: "filebeat on {{ $labels.instance }} has 0 open log files and is not harvesting any logs for the past 5 minutes"
+
+      - alert: FilebeatOutputElasticSearchZeroEventsAcked
+        expr: sum(rate(filebeat_libbeat_output_events{type="acked"}[1m])) by (instance) == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Filebeat is not sending logs to ElasticSearch"
+          description: "filebeat on {{ $labels.instance }} has sent 0 log events to ElasticSearch for the past 5 minutes"
+
+
+
+    # live search alarms
+    - name: live-search
+      rules:
+      - alert: ScrapeOOMKilled
+        expr: sum_over_time(kube_pod_container_status_terminated_reason{container="scrape-api", reason="OOMKilled", namespace="efoe-cache-search-aws-linux" }[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scrape API pods being OOM killed"
+          description: "Scrape api pods for efoe live search has been OOM in the past 5 minutes"
+
+      - alert: ScrapeAPIPodsBeingRestarted
+        expr: count(kube_pod_container_status_restarts_total{container="scrape-api", namespace="efoe-live-search-linux"})>5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scrape API pods have crashed"
+          description: "Efoe live search scrape API pods have crashed in the past 5 minutes"
